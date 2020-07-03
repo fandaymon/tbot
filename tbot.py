@@ -46,16 +46,18 @@ class ContentLoss(nn.Module):
             return input
 
 class StyleLoss(nn.Module):
-        def __init__(self, target_feature):
+        def __init__(self, target_feature, sl_weight):
             super(StyleLoss, self).__init__()
+            self.sl_weight = sl_weight
             self.target = gram_matrix(target_feature).detach()
-            self.loss = F.mse_loss(self.target, self.target)# to initialize with something
+            self.loss = self.sl_weight * F.mse_loss(self.target, self.target)# to initialize with something
 
 
         def forward(self, input):
             G = gram_matrix(input)
-            self.loss = F.mse_loss(G, self.target)
+            self.loss = self.sl_weight * F.mse_loss(G, self.target)
             return input
+
 
 class Normalization(nn.Module):
         def __init__(self, mean, std):
@@ -76,7 +78,11 @@ class Style_transfer:
         self.cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(self.device)
         self.cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(self.device)
         self.content_layers = ['conv_4']
-        self.style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+        self.style_layers = {"conv_1" : 1.0, 
+                         "conv_2" : 0.7,
+                         "conv_3" : 0.2,
+                         "conv_4" : 0.2,
+                         "conv_5" : 0.2}
         self.cnn = models.vgg19(pretrained=True).features.to(self.device).eval()
 
         self.busy = 0 
@@ -129,7 +135,7 @@ class Style_transfer:
                 if name in self.style_layers:
                     # add style loss:
                     target_feature = model(style_img).detach()
-                    style_loss = StyleLoss(target_feature)
+                    style_loss = StyleLoss(target_feature, self.style_layers[name])
                     model.add_module("style_loss_{}".format(i), style_loss)
                     style_losses.append(style_loss)
 
