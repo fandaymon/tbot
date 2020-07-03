@@ -279,12 +279,6 @@ async def process_help_command(message: types.Message):
                'дайте боту команду /st и через некоторое время вы получите результат', sep='\n')
     await message.reply(msg, parse_mode=types.ParseMode.HTML)
 
-#@dp.message_handler()
-#async def echo(message: types.Message):
-#    # old style:
-#    # await bot.send_message(message.chat.id, message.text)
-#
-#    await message.answer(message.text)
     
 @dp.message_handler(content_types=['photo'])
 async def handle_docs_photo(message):
