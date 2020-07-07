@@ -3,6 +3,7 @@ import asyncio
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.utils.markdown import text, hbold, italic, code, pre
+from aiogram.types import ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 
 import torch 
@@ -22,7 +23,7 @@ def gram_matrix(input):
     # b=number of feature maps
     # (h,w)=dimensions of a feature map (N=h*w)
 
-    features = input.view(batch_size * h, w * f_map_num)  # resise F_XL into \hat F_XL
+    features = input.view(batch_size * h, w * f_map_num)  
 
     G = torch.mm(features, features.t())  # compute the gram product
 
@@ -58,7 +59,6 @@ class StyleLoss(nn.Module):
             self.loss = self.sl_weight * F.mse_loss(G, self.target)
             return input
 
-
 class Normalization(nn.Module):
         def __init__(self, mean, std):
             super(Normalization, self).__init__()
@@ -78,14 +78,18 @@ class Style_transfer:
         self.cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(self.device)
         self.cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(self.device)
         self.content_layers = ['conv_4']
+#        self.style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+
         self.style_layers = {"conv_1" : 1.0, 
                          "conv_2" : 0.7,
                          "conv_3" : 0.2,
                          "conv_4" : 0.2,
                          "conv_5" : 0.2}
+
         self.cnn = models.vgg19(pretrained=True).features.to(self.device).eval()
 
         self.busy = 0 
+        self.last_sl = 100
 
 
     def get_style_model_and_losses(self, cnn, normalization_mean, normalization_std,
@@ -135,7 +139,7 @@ class Style_transfer:
                 if name in self.style_layers:
                     # add style loss:
                     target_feature = model(style_img).detach()
-                    style_loss = StyleLoss(target_feature, self.style_layers[name])
+                    style_loss =  StyleLoss(target_feature, self.style_layers[name]) 
                     model.add_module("style_loss_{}".format(i), style_loss)
                     style_losses.append(style_loss)
 
@@ -159,7 +163,7 @@ class Style_transfer:
         im = image.to("cpu").clone().detach()
         im = im.numpy().squeeze()
         im = im.transpose(1,2,0)
-        #im = im * np.array((0.229, 0.224, 0.225)) + np.array((0.485, 0.456, 0.406))
+
         im = im.clip(0, 1)
         return im
 
@@ -169,7 +173,7 @@ class Style_transfer:
         self.busy = 1
         
         imsize = 512  
-        num_steps = 500
+        num_steps = 400
         style_weight = 100000
         content_weight = 1
 
@@ -194,6 +198,8 @@ class Style_transfer:
         optimizer = self.get_input_optimizer(input_img)
 
         run = [0]
+        min_sl = 100
+        
 
         while run[0] <= num_steps:
 
@@ -222,14 +228,23 @@ class Style_transfer:
                 loss.backward()
 
                 run[0] += 1
+                self.last_sl = style_score.item()
+                if run[0] % 100 == 0:
+                    print("run {}:".format(run))
+                    print('Style Loss : {:4f} Content Loss: {:4f}'.format(
+                        style_score.item(), content_score.item()))
+                    print()
 
                 return style_score + content_score
 
             optimizer.step(closure)
+            if self.last_sl<min_sl:
+                min_sl = self.last_sl
+                min_img = self.imcnvt(input_img)
 
 
-
-        input_img = self.imcnvt(input_img)
+        input_img = min_img
+        #input_img = self.imcnvt(input_img)
         plt.imsave('target' + user_id + '.png', input_img, format='png')
 
         self.busy = 0
@@ -239,6 +254,7 @@ class Style_transfer:
 
 API_TOKEN = ''
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
@@ -246,6 +262,9 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 st = Style_transfer()
+
+button_st = KeyboardButton('Style Transfer')
+st_kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button_st)
 
 
 
@@ -285,11 +304,30 @@ async def process_help_command(message: types.Message):
                'дайте боту команду /st и через некоторое время вы получите результат', sep='\n')
     await message.reply(msg, parse_mode=types.ParseMode.HTML)
 
-    
+@dp.message_handler()
+async def echo(message: types.Message):
+#    # old style:
+#    # await bot.send_message(message.chat.id, message.text)
+#
+#    await message.answer(message.text)
+    if message.text=='Style Transfer':
+        user_id = str(message.from_user.id)
+        await bot.send_message(user_id,'Перенос стиля запущен, через некоторое время вы получите результат')
+        while st.busy == 1:
+            await asyncio.sleep(2)
+        x = threading.Thread(target=st.style_transfer_train, args=('content' + user_id + '.jpg','style' + user_id + '.jpg', user_id))
+        x.start()  # делаем style transfer
+        await st_transfer(user_id)
+
+
 @dp.message_handler(content_types=['photo'])
 async def handle_docs_photo(message):
     print(message.caption)
     await message.photo[-1].download(message.caption + str(message.from_user.id) + '.jpg')
+    user_id = str(message.from_user.id)
+    if os.path.exists('content' + user_id + '.jpg') and os.path.exists('content' + user_id + '.jpg') :
+        await message.reply("Стиль и контент получены", reply_markup=st_kb)
+
 
 
 async def st_transfer(user_id):
