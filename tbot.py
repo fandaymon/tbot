@@ -325,7 +325,7 @@ async def handle_docs_photo(message):
     print(message.caption)
     await message.photo[-1].download(message.caption + str(message.from_user.id) + '.jpg')
     user_id = str(message.from_user.id)
-    if os.path.exists('content' + user_id + '.jpg') and os.path.exists('content' + user_id + '.jpg') :
+    if os.path.exists('content' + user_id + '.jpg') and os.path.exists('style' + user_id + '.jpg') :
         await message.reply("Стиль и контент получены", reply_markup=st_kb)
 
 
